@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TopTransfer - Transfer Services Premium à Montpellier</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Google Maps loader used by BookingForm.tsx -->
+    <script type="module">
+      // Глобальная функция, которую вызывает BookingForm: window.loadGoogleMaps()
+      window.loadGoogleMaps = () => {
+        // уже загружено
+        if (window.google && window.google.maps) return Promise.resolve();
+
+        const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+        if (!key) {
+          return Promise.reject(new Error('VITE_GOOGLE_MAPS_API_KEY is missing'));
+        }
+
+        return new Promise((resolve, reject) => {
+          const existing = document.querySelector('script[data-gmaps="1"]');
+          if (existing) {
+            existing.addEventListener('load', () => resolve());
+            existing.addEventListener('error', () =>
+              reject(new Error('Failed to load Google Maps'))
+            );
+            return;
+          }
+
+          const s = document.createElement('script');
+          s.setAttribute('data-gmaps', '1');
+          s.src =`https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async`; 
+          s.async = true;
+          s.defer = true;
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error('Failed to load Google Maps'));
+          document.head.appendChild(s);
+        });
+      };
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

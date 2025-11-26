@@ -1,0 +1,23 @@
+{
+  "devDependencies": {
+    "@types/google.maps": "^3.58.1"
+  },
+  "name": "toptransfer34",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "type": "module",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "stripe": "^19.3.0"
+  }
+}
