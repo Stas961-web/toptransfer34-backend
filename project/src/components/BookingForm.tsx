@@ -10,22 +10,25 @@ import emailjs from '@emailjs/browser';
 import { MapPin, AlertCircle } from 'lucide-react';
 import { PaymentForm } from './PaymentForm';
 
-
-
 interface BookingFormData {
   name: string;
   phone: string;
   email: string;
   pickup: string;
   dropoff: string;
-  date: string;
-  time: string;
+  date: string;          // дата поездки
+  time: string;          // время поездки
   notes: string;
   distance?: number;
   price?: number;
   bookingType: 'distance' | 'hourly';
   hours: number;
   flightNumber?: string;
+
+  // дополнительные поля для Bon de commande (без полей в форме, только для письма)
+  passengers?: number;
+  vehicleType?: string;
+  paymentMethod?: string;
 }
 
 interface FormErrors {
@@ -49,6 +52,9 @@ export function BookingForm() {
     bookingType: 'distance',
     hours: 1,
     flightNumber: '',
+    passengers: 1,
+    vehicleType: 'Mercedes-Benz Classe E (ou équivalent)',
+    paymentMethod: 'Carte bancaire (Stripe)',
   });
 
   const [errors, setErrors] = useState<FormErrors>({
@@ -97,14 +103,10 @@ export function BookingForm() {
         directionsRendererRef.current.setMap(null);
       }
       if (pickupAutocompleteRef.current) {
-        google.maps.event.clearInstanceListeners(
-          pickupAutocompleteRef.current
-        );
+        google.maps.event.clearInstanceListeners(pickupAutocompleteRef.current);
       }
       if (dropoffAutocompleteRef.current) {
-        google.maps.event.clearInstanceListeners(
-          dropoffAutocompleteRef.current
-        );
+        google.maps.event.clearInstanceListeners(dropoffAutocompleteRef.current);
       }
       if (mapRef.current) {
         google.maps.event.clearInstanceListeners(mapRef.current);
@@ -129,7 +131,7 @@ export function BookingForm() {
     setErrors(prev => ({ ...prev, maps: null }));
 
     try {
-      // Подгружаем Google Maps через функцию из index.html
+      // Подгружаем Google Maps через функцию из index.html (тип для window.loadGoogleMaps у тебя уже описан в vite-env.d.ts)
       if (!window.google?.maps && window.loadGoogleMaps) {
         await window.loadGoogleMaps();
       }
@@ -154,12 +156,8 @@ export function BookingForm() {
         polylineOptions: { strokeColor: '#FFD700', strokeWeight: 5 },
       });
 
-      const pickupInput = document.getElementById(
-        'pickup'
-      ) as HTMLInputElement | null;
-      const dropoffInput = document.getElementById(
-        'dropoff'
-      ) as HTMLInputElement | null;
+      const pickupInput = document.getElementById('pickup') as HTMLInputElement | null;
+      const dropoffInput = document.getElementById('dropoff') as HTMLInputElement | null;
 
       if (pickupInput) {
         pickupAutocompleteRef.current =
@@ -251,15 +249,13 @@ export function BookingForm() {
     });
 
     try {
-      const positionPromise = new Promise<GeolocationPosition>(
-        (resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 5000,
-            maximumAge: 0,
-          });
-        }
-      );
+      const positionPromise = new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 0,
+        });
+      });
 
       const position = (await Promise.race([
         positionPromise,
@@ -378,7 +374,7 @@ export function BookingForm() {
     }
   }, [formData.pickup, formData.dropoff, formData.bookingType, formData.hours]);
 
-  // Submit → создаём PaymentIntent на сервере
+  // Создание PaymentIntent на сервере
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -400,14 +396,11 @@ export function BookingForm() {
         setIsSubmitting(true);
         setErrors(prev => ({ ...prev, email: null }));
 
-        const response = await fetch(
-          `${API_BASE}/api/create-payment-intent`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount: formData.price }),
-          }
-        );
+        const response = await fetch(`${API_BASE}/api/create-payment-intent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount: formData.price }),
+        });
 
         if (!response.ok) throw new Error('Failed to create payment intent');
 
@@ -419,9 +412,7 @@ export function BookingForm() {
         setShowPaymentModal(true);
       } catch (err) {
         console.error('Payment init error:', err);
-        alert(
-          "Erreur lors de l'initialisation du paiement. Veuillez réessayer."
-        );
+        alert("Erreur lors de l'initialisation du paiement. Veuillez réessayer.");
       } finally {
         setIsSubmitting(false);
       }
@@ -429,43 +420,98 @@ export function BookingForm() {
     [API_BASE, formData.email, formData.price, t, validateEmail]
   );
 
-  // Отправка письма
   const sendBookingEmail = useCallback(async () => {
     setErrors(prev => ({ ...prev, email: null }));
+  
     try {
+      // 1. Генерируем номер заказа
+      const now = new Date();
+      const pad = (n: number) => n.toString().padStart(2, '0');
+  
+      const orderNumber = `TT-${now.getFullYear()}${pad(
+        now.getMonth() + 1
+      )}${pad(now.getDate())}${pad(now.getHours())}${pad(
+        now.getMinutes()
+      )}${pad(now.getSeconds())}`;
+  
+      // 2. Дата/время брони (когда клиент сделал заказ)
+      const reservationDate = `${pad(now.getDate())}.${pad(
+        now.getMonth() + 1
+      )}.${now.getFullYear()}`;
+      const reservationTime = `${pad(now.getHours())}h${pad(
+        now.getMinutes()
+      )}`;
+      const reservationDateTime = `${reservationDate} à ${reservationTime}`;
+  
+      // 3. Дата/время поездки (то, что клиент выбрал в форме)
+      const pickupDate = formData.date || reservationDate;
+      const pickupTime = formData.time || reservationTime;
+  
+      // 4. Прочие поля для bon de commande
+      const distanceText =
+        formData.bookingType === 'distance' && formData.distance
+          ? `${formData.distance.toFixed(2)} km`
+          : 'N/A';
+  
+      const estimatedPriceText = formData.price
+        ? `${formData.price.toFixed(2)} €`
+        : 'N/A';
+  
+      const totalText = estimatedPriceText; // у нас полная предоплата
+  
+      const bookingTypeText =
+        formData.bookingType === 'distance'
+          ? 'Course au forfait (distance)'
+          : `Mise à disposition (${formData.hours}h)`;
+  
+      // пока нет отдельных полей в форме — задаём значения по умолчанию
+      const passengersText = '1–4';
+      const vehicleTypeText = 'Mercedes Classe E – TopTransfer';
+      const paymentMethodText = 'Carte bancaire en ligne (Stripe)';
+  
+      const signatureDate = reservationDate;
+  
       await emailjs.send(
         import.meta.env.VITE_EMAILJS_SERVICE_ID ?? 'service_ew0f6ae',
         import.meta.env.VITE_EMAILJS_TEMPLATE_ID ?? 'template_wrd97hj',
         {
-          to_name: 'TopTransfer',
-          to_email: 'toptransfer34@gmail.com',
-          from_name: formData.name,
-          from_email: formData.email,
-          booking_type:
-            formData.bookingType === 'distance'
-              ? 'Distance-based'
-              : 'Hourly',
-          name: formData.name,
+          // ----- Шапка bon de commande -----
+          order_number: orderNumber,
+          reservation_datetime: reservationDateTime,
+  
+          // ----- Клиент -----
+          client_name: formData.name,
           phone: formData.phone,
-          email: formData.email,
+          client_email: formData.email,
+  
+          // ----- Данные поездки -----
+          pickup_date: pickupDate,
+          pickup_time: pickupTime,
+          passengers: passengersText,
           pickup: formData.pickup,
           dropoff: formData.dropoff,
-          date: formData.date,
-          time: formData.time,
-          flight_number: formData.flightNumber || 'Not provided',
-          distance:
-            formData.bookingType === 'distance'
-              ? `${formData.distance?.toFixed(2)} km`
-              : 'N/A',
-          hours:
-            formData.bookingType === 'hourly' ? formData.hours : 'N/A',
-          estimated_price: `€${formData.price?.toFixed(2)}`,
-          notes: formData.notes || 'No additional notes',
-          payment_status: 'Paid (100%)',
-          message: `New booking from ${formData.name}. Pickup: ${formData.pickup}, Dropoff: ${formData.dropoff}, Date: ${formData.date}, Time: ${formData.time}`,
+          vehicle_type: vehicleTypeText,
+          booking_type: bookingTypeText,
+          flight_number: formData.flightNumber || 'Non communiqué',
+          distance: distanceText,
+          estimated_price: estimatedPriceText,
+  
+          // ----- Оплата -----
+          payment_method: paymentMethodText,
+          total: totalText,
+  
+          // ----- Прочее -----
+          notes: formData.notes || 'Aucune remarque',
+          signature_date: signatureDate,
+  
+          // Старые поля (если ты их где-то ещё используешь в шаблоне)
+          name: formData.name,
+          email: formData.email,
+          booking_type_raw: formData.bookingType,
         },
         import.meta.env.VITE_EMAILJS_PUBLIC_KEY ?? 'DmcnbmVtpIY40XKhg'
       );
+  
       return true;
     } catch (error) {
       console.error('Failed to send email:', error);
@@ -512,13 +558,21 @@ export function BookingForm() {
 
         if (name === 'hours') {
           newData.hours = Math.max(1, Number(value));
+          // если уже выбран hourly — пересчитаем цену
+          if (prev.bookingType === 'hourly') {
+            newData.price = newData.hours * 70;
+          }
         }
 
         if (name === 'bookingType') {
           if (value === 'hourly') {
+            newData.bookingType = 'hourly';
             newData.price = newData.hours * 70;
-          } else if (value === 'distance' && newData.distance) {
-            newData.price = 20 + newData.distance * 2.5;
+          } else if (value === 'distance') {
+            newData.bookingType = 'distance';
+            if (newData.distance != null) {
+              newData.price = 20 + newData.distance * 2.5;
+            }
           }
         }
 
@@ -541,9 +595,7 @@ export function BookingForm() {
             onChange={handleInputChange}
             className="w-full px-4 py-2 rounded-md border border-gray-300 focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
           >
-            <option value="distance">
-              {t('booking.distanceBased')}
-            </option>
+            <option value="distance">{t('booking.distanceBased')}</option>
             <option value="hourly">{t('booking.hourly')}</option>
           </select>
         </div>
@@ -630,7 +682,7 @@ export function BookingForm() {
           >
             {!mapsLoaded && (
               <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg">
-                <div className="animate-spin rounded-full h-12 w-12 border-4 border-yellow-500 border-t-transparent"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-4 border-yellow-500 border-t-transparent" />
               </div>
             )}
           </div>
@@ -755,17 +807,14 @@ export function BookingForm() {
           <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
             {formData.bookingType === 'distance' && (
               <p className="text-gray-700">
-                {t('booking.distance')}:{' '}
-                {formData.distance.toFixed(2)} km
+                {t('booking.distance')}: {formData.distance.toFixed(2)} km
               </p>
             )}
             <p className="text-gray-700 font-semibold">
-              {t('booking.estimatedPrice')}:{' '}
-              €{formData.price.toFixed(2)}
+              {t('booking.estimatedPrice')}: €{formData.price.toFixed(2)}
             </p>
             <p className="text-sm text-gray-500 mt-2">
-              Le paiement complet est requis pour confirmer votre
-              réservation.
+              Le paiement complet est requis pour confirmer votre réservation.
             </p>
           </div>
         )}
@@ -834,9 +883,7 @@ export function BookingForm() {
           type="submit"
           disabled={isSubmitting || !formData.price}
           className={`w-full bg-yellow-500 text-black font-semibold py-3 px-6 rounded-md hover:bg-yellow-600 transform transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${
-            isSubmitting || !formData.price
-              ? 'opacity-50 cursor-not-allowed'
-              : ''
+            isSubmitting || !formData.price ? 'opacity-50 cursor-not-allowed' : ''
           }`}
         >
           {isSubmitting
@@ -881,3 +928,4 @@ export function BookingForm() {
     </>
   );
 }
+
